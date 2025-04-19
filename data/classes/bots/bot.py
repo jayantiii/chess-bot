@@ -1,5 +1,7 @@
 import random
 
+from bot import board
+
 class Bot:
     def __init__(self):
         # Piece values - adjusted for ACM Chess variant
@@ -92,44 +94,159 @@ class Bot:
         }
         
     def move(self, side, board):
-        """
-        Determine the best move for the current side
-        Args:
-            side: 'w' for white, 'b' for black
-            board: the chess board object
-        Returns:
-            ((from_row, from_col), (to_row, to_col)): the chosen move
-        """
-        # Get valid moves and board state
         valid_moves = board.get_all_valid_moves(side)
         board_state = board.get_board_state()
         opponent = 'b' if side == 'w' else 'w'
-        
-        # If no valid moves, return None (should not happen in this game)
+
         if not valid_moves:
             return None
-            
-        # First check for any moves that can capture the king and win immediately
+
+        best_score = float('-inf')
+        best_move = None
+
+        # Evaluate material balance to decide aggression/defense
+        my_material = self.compute_material(board_state, side)
+        opp_material = self.compute_material(board_state, opponent)
+        material_diff = my_material - opp_material
+        losing = material_diff < -500  # If down by a major piece
+
         for move in valid_moves:
-            (from_row, from_col), (to_row, to_col) = move
-            target_piece = board_state[to_row][to_col]
-            
-            # If we can capture the king, do it immediately
-            if target_piece and target_piece[0] == opponent and target_piece[1] == 'K':
-                return move
-                
-        # Calculate scores for all moves
-        move_scores = []
-        
-        for move in valid_moves:
+            cloned_board = board.clone()
+            cloned_board.apply_move(move)
+            cloned_state = cloned_board.get_board_state()
+
             score = self.evaluate_move(board_state, move, side, opponent)
-            move_scores.append((move, score))
-            
-        # Sort moves by score (highest first)
-        move_scores.sort(key=lambda x: x[1], reverse=True)
-        
-        # Return the highest scoring move
-        return move_scores[0][0]
+
+            # Bonus for check
+            if self.puts_king_in_check(cloned_board, opponent):
+                score += 150
+
+            # Avoid losing own king
+            if self.leaves_king_in_check(cloned_board, side):
+                score -= 9999
+                continue  # never make suicidal move
+
+            # Avoid hanging piece
+            (_, _), (tr, tc) = move
+            if self.would_be_captured(cloned_board, tr, tc, opponent):
+                score -= self.PIECE_VALUES.get(board_state[tr][tc][1], 0) * 0.9
+
+            # Defensive: prefer draws when losing
+            if losing:
+                score += self.defensive_bias(move, board_state, side, opponent)
+
+            # Offensive: trade up when ahead
+            elif material_diff > 400:
+                score += self.trade_advantage(move, board_state)
+
+            # Prefer centralization and mobility
+            score += len(cloned_board.get_all_valid_moves(side)) * 1.5
+
+            if score > best_score:
+                best_score = score
+                best_move = move
+
+        return best_move
+
+
+    def would_be_captured(self, board_state, move, opponent):
+        """
+        Check if the piece at move's destination can be captured next turn.
+        """
+        (_, _), (tr, tc) = move
+        simulated_attackers = self.get_attackers(board_state, tr, tc, opponent)
+        return bool(simulated_attackers)
+
+    def avoids_capture(self, board_state, move, side):
+        """
+        Reward if current piece is under threat and move avoids it.
+        """
+        (fr, fc), (tr, tc) = move
+        opponent = 'b' if side == 'w' else 'w'
+        attackers = self.get_attackers(board_state, fr, fc, opponent)
+        if attackers:
+            new_attackers = self.get_attackers(board_state, tr, tc, opponent)
+            return len(new_attackers) < len(attackers)
+        return False
+
+    def get_attackers(self, board, target_row, target_col, attacker_side):
+        """
+        Get a list of opponent moves that could capture target square.
+        """
+        threats = []
+        opp_moves = board.get_all_valid_moves(attacker_side)
+        for (fr, fc), (tr, tc) in opp_moves:
+            if tr == target_row and tc == target_col:
+                threats.append(((fr, fc), (tr, tc)))
+        return threats
+
+    
+    def compute_material(self, board_state, side):
+        total = 0
+        for row in board_state:
+            for piece in row:
+                if piece and piece[0] == side:
+                    total += self.PIECE_VALUES.get(piece[1], 0)
+        return total
+
+    def puts_king_in_check(self, board, opponent):
+        king_pos = self.find_king(board.get_board_state(), opponent)
+        if not king_pos:
+            return False
+        for move in board.get_all_valid_moves(self._opposite(opponent)):
+            (_, _), (tr, tc) = move
+            if (tr, tc) == king_pos:
+                return True
+        return False
+
+    def leaves_king_in_check(self, board, side):
+        king_pos = self.find_king(board.get_board_state(), side)
+        if not king_pos:
+            return True
+        for move in board.get_all_valid_moves(self._opposite(side)):
+            (_, _), (tr, tc) = move
+            if (tr, tc) == king_pos:
+                return True
+        return False
+
+    def would_be_captured(self, board, row, col, attacker):
+        for move in board.get_all_valid_moves(attacker):
+            (_, _), (tr, tc) = move
+            if tr == row and tc == col:
+                return True
+        return False
+
+    def trade_advantage(self, move, board_state):
+        (fr, fc), (tr, tc) = move
+        target = board_state[tr][tc]
+        attacker = board_state[fr][fc]
+        if target and attacker:
+            return self.PIECE_VALUES[target[1]] - self.PIECE_VALUES[attacker[1]]
+        return 0
+
+    def defensive_bias(self, move, board_state, side, opponent):
+        """ When losing, avoid complex exchanges, keep king safe, and try to simplify """
+        score = 0
+        (fr, fc), (tr, tc) = move
+        piece = board_state[fr][fc]
+        target = board_state[tr][tc]
+
+        if piece and piece[1] == 'K':
+            score += 20  # Keep king mobile
+        if target:
+            # Avoid major trades unless gaining
+            if self.PIECE_VALUES.get(target[1], 0) > 500:
+                score -= 30
+        # Avoid moving into attack range
+        if self.would_be_captured(board_state, tr, tc, opponent):
+            score -= 40
+
+        return score
+
+    def _opposite(self, side):
+        return 'b' if side == 'w' else 'w'
+
+
     
     def evaluate_move(self, board_state, move, side, opponent):
         """

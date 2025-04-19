@@ -149,6 +149,7 @@ class Board:
             self.num_moves += 1
             return True
 
+
     def alg_not_to_pos(self, alg_not):
         return (ord(alg_not[0]) - 65, int(alg_not[1]) - 1)
 
