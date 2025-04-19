@@ -1,15 +1,23 @@
 from enum import IntEnum
 
 class PieceType(IntEnum):
-    PAWN = 1
-    KNIGHT = 2
-    BISHOP = 3
-    ROOK = 4
-    QUEEN = 5
-    KING = 6
-    JOKER = 7
-    STAR = 8
+    WHITE_PAWN = 1
+    WHITE_KNIGHT = 2
+    WHITE_BISHOP = 3
+    WHITE_ROOK = 4
+    WHITE_QUEEN = 5
+    WHITE_KING = 6
+    WHITE_JOKER = 7
+    WHITE_STAR = 8
     EMPTY = 0
+    BLACK_PAWN = -1
+    BLACK_KNIGHT = -2
+    BLACK_BISHOP = -3
+    BLACK_ROOK = -4
+    BLACK_QUEEN = -5
+    BLACK_KING = -6
+    BLACK_JOKER = -7
+    BLACK_STAR = -8
 
 
 def get_legal_moves(board, from_position, to_position):
