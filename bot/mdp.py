@@ -2,6 +2,8 @@ from sortedcontainers import SortedDict
 import numpy as np
 import ubjson
 
+from tqdm import tqdm
+
 class MDPModel:
     def __init__(self, gamma=0.99):
         self.gamma = gamma
@@ -25,10 +27,10 @@ class MDPModel:
         probs = np.exp(probs)
         probs /= np.sum(probs)
         idx = np.random.choice(len(states), p=probs)
-        return states[idx]
+        return states[idx][0]
     
     def update(self, state, action, reward, next_state):
-        key = (*state, *action)
+        key = (state, action)
         if state not in self.state_action_map:
             self.state_action_map[state] = set()
         self.state_action_map[state].add(action)
@@ -38,7 +40,7 @@ class MDPModel:
             self.qtable[key] = -reward
         else:
             action_set = self.state_action_map[next_state]
-            max_q = max([self.qtable.get((*next_state, *a), -1e6) for a in action_set], default=0)
+            max_q = max([self.qtable.get((next_state, a), -1e6) for a in action_set], default=0)
             self.qtable[key] = -reward + self.gamma * max_q
     
     def step(self, state, explore=0.0):
@@ -53,7 +55,7 @@ class MDPModel:
         max_q = -1e6
         best_action = None
         for action in action_set:
-            q = self.qtable.get((*state, *action), -1e6)
+            q = self.qtable.get((state, action), -1e6)
             if q > max_q:
                 max_q = q
                 best_action = action
@@ -64,10 +66,40 @@ class MDPModel:
         
     def save(self, filename):
         with open(filename, 'wb') as f:
-            ubjson.dump(self.qtable, f)
+            ubjson.dump({
+                'gamma': self.gamma,
+                'state_action_map': self.state_action_map,
+                'qtable': self.qtable
+            }, f)
+    
+    def load(self, filename):
+        with open(filename, 'rb') as f:
+            data = ubjson.load(f)
+            self.gamma = data['gamma']
+            self.state_action_map = data['state_action_map']
+            self.qtable = SortedDict(data['qtable'])
     
 class MDPTrainer:
-    def __init__(self, env, model,):
+    def __init__(self, env, model, explore=0.5, save_interval=1000, save_path='model.ubjson'):
         self.env = env
         self.model = model
+        self.explore = explore
+        self.save_interval = save_interval
+        self.save_path = save_path
     
+    def train(self, num_steps=10000):
+        done = True
+        for step in tqdm(range(num_steps)):
+            if done:
+                state, _ = self.env.reset()
+                done = False
+            action = self.model.step(state, self.explore)
+            next_state, reward, done, _ = self.env.step(action)
+            self.model.update(state, action, reward, next_state)
+            state = next_state
+            if step % self.save_interval == 0:
+                self.model.save(self.save_path)
+            
+            if step % 200:
+                done = False
+                self.env.set_state(self.model.sample()) 
