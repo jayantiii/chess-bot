@@ -1,5 +1,3 @@
-# env.py
-
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
@@ -89,7 +87,9 @@ class ACMChessEnv(gym.Env):
         return self._get_obs(), self._get_info()
 
     def step(self, action):
-        from_row, from_col, to_row, to_col = action
+        from_pos, to_pos = decode_action(action)
+        reward = 0
+        done = False
 
         # Convert coordinates to match Board class's coordinate system
         start_pos = (from_col, from_row)
@@ -98,11 +98,10 @@ class ACMChessEnv(gym.Env):
         # Perform move using Board class
         success = self.board.handle_move(start_pos, end_pos)
 
-        if not success:
+        if (from_pos, to_pos) not in legal_moves:
+            # Illegal move: penalize and do random move
+            self.board.make_random_move(self.current_player)
             reward = -1
-            terminated = True
-            truncated = False
-            self.done = True
         else:
             # Check if the move resulted in checkmate
             opponent_color = 'black' if self.current_side == 'white' else 'white'
