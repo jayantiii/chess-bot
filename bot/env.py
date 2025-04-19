@@ -3,6 +3,12 @@
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
+import sys
+import os
+
+# Add the project root directory to Python path
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from data.classes.Board import Board
 
 class ACMChessEnv(gym.Env):
     """
@@ -20,10 +26,12 @@ class ACMChessEnv(gym.Env):
         "render_fps": 1
     }
 
-    def __init__(self, render_mode=None):
+    def __init__(self, render_mode=None, width=600, height=600):
         self.render_mode = render_mode
-        self.board = None
-        self.current_side = 'w'
+        self.width = width
+        self.height = height
+        self.board = Board(width, height)
+        self.current_side = 'white'
         self.done = False
         self.spec = None
 
@@ -42,13 +50,14 @@ class ACMChessEnv(gym.Env):
         obs = np.zeros((6, 6), dtype=np.uint8)
         piece_map = {
             '': 0,
-            'P': 1, 'C': 2, 'N': 3, 'B': 4,
-            'Q': 5, 'K': 6, 'S': 7, 'J': 8,
+            'P': 1, 'N': 2, 'B': 3, 'Q': 4,
+            'K': 5, 'S': 6
         }
 
+        board_state = self.board.get_board_state()
         for i in range(6):
             for j in range(6):
-                cell = self.board[i][j]
+                cell = board_state[i][j]
                 if cell:
                     color, piece = cell[0], cell[1]
                     offset = 0 if color == 'w' else 6
@@ -57,7 +66,13 @@ class ACMChessEnv(gym.Env):
         return obs
 
     def _get_info(self):
-        return {}
+        return {
+            "valid_moves": self.board.get_all_valid_moves(self.current_side),
+            "turn": self.current_side,
+            "is_check": self.board.is_in_check(self.current_side),
+            "is_checkmate": self.board.is_in_checkmate(self.current_side),
+            "is_draw": self.board.is_in_draw()
+        }
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
@@ -67,8 +82,8 @@ class ACMChessEnv(gym.Env):
             self._np_random, self._np_random_seed = np.random.default_rng(), -1
 
         # Initialize board
-        self.board = self._initial_board()
-        self.current_side = 'w'
+        self.board = Board(self.width, self.height)
+        self.current_side = 'white'
         self.done = False
 
         return self._get_obs(), self._get_info()
@@ -76,8 +91,12 @@ class ACMChessEnv(gym.Env):
     def step(self, action):
         from_row, from_col, to_row, to_col = action
 
-        # Perform move (implement actual move logic externally)
-        success = self._handle_move((from_row, from_col), (to_row, to_col))
+        # Convert coordinates to match Board class's coordinate system
+        start_pos = (from_col, from_row)
+        end_pos = (to_col, to_row)
+
+        # Perform move using Board class
+        success = self.board.handle_move(start_pos, end_pos)
 
         if not success:
             reward = -1
@@ -85,58 +104,28 @@ class ACMChessEnv(gym.Env):
             truncated = False
             self.done = True
         else:
-            reward = 1 if self._is_king_captured('b' if self.current_side == 'w' else 'w') else 0
+            # Check if the move resulted in checkmate
+            opponent_color = 'black' if self.current_side == 'white' else 'white'
+            reward = 1 if self.board.is_in_checkmate(opponent_color) else 0
             terminated = reward > 0
-            truncated = False
-            self.done = terminated
-            self.current_side = 'b' if self.current_side == 'w' else 'w'
+            truncated = self.board.is_in_draw()
+            self.done = terminated or truncated
+            self.current_side = 'black' if self.current_side == 'white' else 'white'
 
         return self._get_obs(), reward, terminated, truncated, self._get_info()
 
     def render(self):
         if self.render_mode == "ansi":
             output = ""
-            for row in self.board:
+            board_state = self.board.get_board_state()
+            for row in board_state:
                 output += ' '.join(['__' if x == '' else x for x in row]) + "\n"
             return output
         elif self.render_mode == "human":
-            print(self.render())
+            print(self.render("ansi"))
 
     def close(self):
         pass
-
-    def _initial_board(self):
-        return [
-            ["bC", "bN", "bQ", "bK", "bB", "bS"],
-            ["bP", "bP", "bP", "bP", "bP", "bP"],
-            ["", "", "", "", "", ""],
-            ["", "", "", "", "", ""],
-            ["wP", "wP", "wP", "wP", "wP", "wP"],
-            ["wC", "wN", "wQ", "wK", "wB", "wS"]
-        ]
-
-    def _handle_move(self, from_pos, to_pos):
-        # Dummy implementation — replace with rules + validation
-        fx, fy = from_pos
-        tx, ty = to_pos
-
-        if not (0 <= fx < 6 and 0 <= fy < 6 and 0 <= tx < 6 and 0 <= ty < 6):
-            return False
-
-        piece = self.board[fx][fy]
-        if not piece or piece[0] != self.current_side:
-            return False
-
-        self.board[tx][ty] = piece
-        self.board[fx][fy] = ''
-        return True
-
-    def _is_king_captured(self, color):
-        for row in self.board:
-            for cell in row:
-                if cell == f"{color}K":
-                    return False
-        return True
 
     @property
     def np_random(self):
