@@ -1,5 +1,3 @@
-# test_env.py
-
 from env import ACMChessEnv
 import numpy as np
 
@@ -20,13 +18,13 @@ def test_env():
         print("No valid moves available.")
         return
 
-    # Convert move format from ((x1, y1), (x2, y2)) to action format
-    (from_x, from_y), (to_x, to_y) = valid_moves[0]
-    action = (from_y, from_x, to_y, to_x)  # remember: (row, col) mapping
+    # Convert ((row, col), (row, col)) → (from_row, from_col, to_row, to_col)
+    (from_row, from_col), (to_row, to_col) = valid_moves[0]
+    action = (from_row, from_col, to_row, to_col)
 
     obs, reward, terminated, truncated, info = env.step(action)
 
-    print("After first move:")
+    print("\nAfter first move:")
     print("Observation:\n", obs)
     print("Reward:", reward)
     print("Terminated:", terminated)
